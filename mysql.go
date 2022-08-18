@@ -15,32 +15,64 @@ func (handler *CoreDNSMySql) findRecord(zone string, name string, types ...strin
 	}
 	defer db.Close()
 
-	var query string
+	// for subdomains
 	if name != zone {
-		query = strings.TrimSuffix(name, "."+zone)
+		query := strings.TrimSuffix(name, "."+zone)
+		sqlQuery := fmt.Sprintf("SELECT name, zone, ttl, record_type, content FROM %s WHERE zone = ? AND name = ? AND record_type IN ('%s')",
+			handler.tableName,
+			strings.Join(types, "','"))
+		result, err := db.Query(sqlQuery, zone, query)
+		if err != nil {
+			return nil, err
+		}
+
+		var recordName string
+		var recordZone string
+		var recordType string
+		var ttl uint32
+		var content string
+		records := make([]*Record, 0)
+		for result.Next() {
+			err = result.Scan(&recordName, &recordZone, &ttl, &recordType, &content)
+			if err != nil {
+				return nil, err
+			}
+
+			records = append(records, &Record{
+				Name:       recordName,
+				Zone:       recordZone,
+				RecordType: recordType,
+				Ttl:        ttl,
+				Content:    content,
+				handler:    handler,
+			})
+		}
+
+		return records, nil
 	}
-	sqlQuery := fmt.Sprintf("SELECT name, zone, ttl, record_type, content FROM %s WHERE zone = ? AND name = ? AND record_type IN ('%s')",
+
+	// for domains
+	sqlQuery := fmt.Sprintf("SELECT zone, ttl, record_type, content FROM %s WHERE zone = ? AND name = '@' AND record_type IN ('%s')",
 		handler.tableName,
 		strings.Join(types, "','"))
-	result, err := db.Query(sqlQuery, zone, query)
+	result, err := db.Query(sqlQuery, zone)
 	if err != nil {
 		return nil, err
 	}
 
-	var recordName string
 	var recordZone string
 	var recordType string
 	var ttl uint32
 	var content string
 	records := make([]*Record, 0)
 	for result.Next() {
-		err = result.Scan(&recordName, &recordZone, &ttl, &recordType, &content)
+		err = result.Scan(&recordZone, &ttl, &recordType, &content)
 		if err != nil {
 			return nil, err
 		}
 
 		records = append(records, &Record{
-			Name:       recordName,
+			Name:       name,
 			Zone:       recordZone,
 			RecordType: recordType,
 			Ttl:        ttl,
